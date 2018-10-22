@@ -1,15 +1,23 @@
-<template>
-  <div class="div"  >
+<template >
+  <div class="div">
     <h2><span v-if="transformation == 'on'">режим трансформации </span><span v-else>Режим мапинга</span></h2>
-    <button @click="setClosed">Замкнуть фигуру</button>
-    <button @click="setClear">Очистить</button>
-    <button @click="setTransform">Трансформировать</button>
+    <button @click="setClosed">Замкнуть фигуру</button>&nbsp;
+    <button @click="setClear">Очистить</button>&nbsp;
+    <button @click="setTransform">Трансформировать</button>&nbsp;
 
-    <label for="scale">Маштаб</label>
-    <input type="range" id="scale" min="1" max="100" value="50" @input="scaleAll" >
+    <label for="scale">Маштаб</label>&nbsp;
+    <input type="range" id="scale" min="1" max="100" value="50" @input="scaleAll" > &nbsp;
 
-    <v-stage @click="clickStage" ref="stage" :config="configKonva" @wheel="scaleAll">
-      <v-layer ref="layerImg">
+    <span>Для перетаскивания зажмите ctrl </span>
+    <v-stage
+            ref="stage"
+            :config="configKonva"
+            @click="clickStage"
+            @mousemove="moveImage"
+            @wheel="scaleAll"
+            @mouseup="stopDragImage"
+    >
+      <v-layer ref="layerImg" >
         <v-image :config="configImg"></v-image>
       </v-layer>
       <v-layer ref="layer" >
@@ -42,7 +50,7 @@ export default {
             transformation: 'off',
             circleRadius: 3,
             contextMenu: true,
-            deltaAllScale: 1
+            deltaAllScale: 1,
         }
     },
     computed: {
@@ -57,10 +65,28 @@ export default {
         }
     },
     methods: {
+        moveImage(c,event) {
+            const e = event.evt;
+            if (e.ctrlKey) {
+                const layerImg = this.$refs.layerImg.getStage();
+                const layer = this.$refs.layer.getStage();
+                layerImg.draggable(true)
+                layerImg.on('dragmove', (node)=>{
+                    layer.x(node.target.x());
+                    layer.y(node.target.y());
+                    layer.draw()
+                })
+            }
+        },
+        stopDragImage(){
+            const layerImg = this.$refs.layerImg.getStage();
+            layerImg.draggable(false)
+
+
+        },
         scaleAll(c,e){
             const layer = this.$refs.layer.getStage();
             const layerImg = this.$refs.layerImg.getStage();
-            let delta = 0;
             if (c instanceof Event) {
                 this.deltaAllScale =  c.target.value * 25 * 0.001;
             }
@@ -77,13 +103,13 @@ export default {
             layerImg.scaleY(this.deltaAllScale);
             layerImg.draw();
 
-            console.log(layer.scale())
         },
         calculatedXY(xy){
             const   groupPoly = this.$refs.groupPoly.getStage(),
+                    layer = this.$refs.layer.getStage(),
 
-              x = (xy[0] - (groupPoly.x() * this.deltaAllScale)) / (groupPoly.scaleX() * this.deltaAllScale),///
-              y = (xy[1] - (groupPoly.y() * this.deltaAllScale)) / (groupPoly.scaleY() * this.deltaAllScale);///
+              x = (xy[0] - layer.x() - (groupPoly.x() * this.deltaAllScale)) / (groupPoly.scaleX() * this.deltaAllScale),///
+              y = (xy[1] - layer.y() - (groupPoly.y() * this.deltaAllScale)) / (groupPoly.scaleY() * this.deltaAllScale);///
 
             return [x,y]
 
@@ -224,8 +250,13 @@ export default {
             if (this.transformation == 'off') {
                 this.transformation = 'on'
                 var tr = new window.Konva.Transformer()
-                let layer = this.$refs.layer.getStage(tr)
 
+                // добавляем трансформаию толлько одноверменную по всем сторонам,
+                // потому что line Stroc невозможно пересчитать
+                tr.keepRatio(true)
+                tr.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
+
+                let layer = this.$refs.layer.getStage(tr)
                 tr.attachTo(groupPoly)
                 layer.add(tr)
                 groupPoly.draggable(true)
@@ -235,6 +266,12 @@ export default {
                 this.transformation = 'off'
                 this.unTransformCircle()
                 groupPoly.draggable(false)
+                groupPoly.getChildren((node)=>{
+                    if (node.getClassName() === 'Line') {
+                        node.strokeWidth(this.configPoly.strokeWidth / groupPoly.scaleX() );
+                        node.draw();
+                    }
+                })
                 stage.draw()
             }
         },
