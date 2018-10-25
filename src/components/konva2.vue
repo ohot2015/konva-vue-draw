@@ -1,16 +1,14 @@
 <template >
-  <div class="div">
-    <h2><span v-if="transformation == 'on'">режим трансформации </span><span v-else>Режим мапинга</span></h2>
+  <div class="mappigKonva">
     <button @click="setClosed">Замкнуть фигуру</button>&nbsp;
     <button @click="setClear">Очистить</button>&nbsp;
     <!--<button @click="setTransform">Трансформировать</button>&nbsp;-->
-
     <label for="scale">Маштаб</label>&nbsp;
     <input type="range" id="scale" min="1" max="100" value="50" @input="scaleAll" > &nbsp;
-    <label for="sizePoint">размер точки</label>&nbsp;
-    <input type="number" id="sizePoint" @change="changePointSize" :value="circleRadius">
+    <!--<label for="sizePoint">размер точки</label>&nbsp;-->
+    <!--<input type="number" id="sizePoint" @change="changePointSize" :value="defaultConfigCircle.radius">-->
     <span>Для перетаскивания зажмите ctrl </span>
-    <textarea cols="30" rows="10">{{ polygons }}</textarea>
+      <input type="hidden" value="">
     <v-stage
             ref="stage"
             :config="configKonva"
@@ -23,9 +21,17 @@
         <v-image :config="configImg"></v-image>
       </v-layer>
       <v-layer ref="layer" >
-        <v-group ref="groupPoly" v-for="poly in polygons">
-          <v-line ref="line"  :config="poly.configPoly"></v-line>
-          <v-circle v-for="c in circle"></v-circle>
+        <v-group ref="groupPoly" v-for="poly in polygons" :config="defaultGroup">
+          <v-line ref="line" :config="poly.poly"></v-line>
+          <v-circle
+                  v-for="c in poly.circle"
+                  :config="c"
+                  @mousedown="mousedownCircle"
+                  @mouseover="mouseoverCircle"
+                  @mouseout="mouseoutCircle"
+                  @dragmove="dragmoveCircle"
+          >
+          </v-circle>
         </v-group>
       </v-layer>
     </v-stage>
@@ -41,28 +47,37 @@ export default {
                 width: 1817,
                 height: 648
             },
-            polygons:[
-                {
-                    configPoly: {
-                        points: [],
-                        fill: 'rgba(0,0,0,.5)',
-                        stroke: 'black',
-                        strokeWidth: 2,
-                        closed : false,
-                    },
-                    circle:[]
-                },
-            ],
-
+            polygons:[],
+            defaultConfigPoly:{
+                points: [],
+                fill: 'rgba(0,0,0,.5)',
+                stroke: 'black',
+                strokeWidth: 1,
+                closed : true,
+                saved:false
+            },
+            defaultGroup:{
+                x:0,
+                y:0,
+                scaleX:1,
+                scaleY:1,
+                poly:'',
+                circle:[],
+            },
+            defaultConfigCircle:{
+                x:0,
+                y:0,
+                radius: 2,
+                fill: 'red',
+                stroke: 'black',
+                strokeWidth: 1,
+                draggable: true,
+                num: 0
+            },
             testImg: new Image(100, 100),
-            transformation: 'off',
-            circleRadius: 3,
-            contextMenu: true,
             deltaAllScale: 1,
-            line:{},
-            groupPoly:{},
-            layer:{}
-
+            eventClick:{},
+            currentGroup:{},
         }
     },
     computed: {
@@ -78,13 +93,8 @@ export default {
     },
     methods: {
         changePointSize(e) {
-            this.groupPoly.getChildren((node)=>{
-                if (node.getClassName() === 'Circle') {
-                    node.radius(+e.target.value);
-                    this.circleRadius = +e.target.value;
-                }
-            })
-            this.groupPoly.draw();
+            this.defaultConfigCircle.radius = e.target.value;
+            this.currentGroup.circle.forEach((obj)=>{obj.radius = e.target.value})
         },
         moveImage(c,event) {
             const e = event.evt;
@@ -112,7 +122,7 @@ export default {
                 this.deltaAllScale = this.layer.scaleX() + -e.evt.deltaY * 0.001;
             }
             this.$refs.stage.getStage().getChildren((layer)=>{
-                this.unTransformCircle()
+            //    this.unTransformCircle()
                 layer.scaleX(this.deltaAllScale);
                 layer.scaleY(this.deltaAllScale);
                 layer.draw();
@@ -122,201 +132,97 @@ export default {
             layerImg.draw();
 
         },
-        calculatedXY(xy){
+        calculatedXY(xy,group){
             let
-              x = (xy[0] - this.layer.x() - (this.groupPoly.x() * this.deltaAllScale)) / (this.groupPoly.scaleX() * this.deltaAllScale),///
-              y = (xy[1] - this.layer.y() - (this.groupPoly.y() * this.deltaAllScale)) / (this.groupPoly.scaleY() * this.deltaAllScale);///
-            return [x,y]
+              x = (xy[0] - this.layer.x() - (group.x * this.deltaAllScale)) / (group.scaleX * this.deltaAllScale),///
+              y = (xy[1] - this.layer.y() - (group.y * this.deltaAllScale)) / (group.scaleY * this.deltaAllScale);///
+            return {x:x,y:y}
         },
-        drawCircle(x,y,num){
-                let layer = this.layer,
-                groupPoly = this.groupPoly,
-                circle = {
-                    x: x,
-                    y: y,
-                    radius: this.circleRadius,
-                    fill: 'red',
-                    stroke: 'black',
-                    strokeWidth: 1,
-                    draggable: true,
-                    circleNum: num
-                };
-
-            circle.on('mousedown',  (e)=> {
-                this.removePointPolygonAndCircle(e);
-            })
-            .on('mouseup', (e)=> {
-                this.transformation = 'off';
-                if (e.evt.button === 2) {
-                    this.contextMenu = true
-                }
-            })
-            .on('mouseover', function() {
-                document.body.style.cursor = 'pointer';
-            })
-            .on('mouseout', function() {
-                document.body.style.cursor = 'default';
-            })
-            .on('dragmove',(e)=>{
-                this.circleDragMove(e);
-            })
-
-            window.oncontextmenu = () => this.contextMenu;
-
-            groupPoly.add(circle);
-            this.unTransformCircle()
-            layer.add(groupPoly);
-            layer.draw();
+        dragmoveCircle(c,e){
+            this.currentGroup.poly.points[e.target.attrs.num * 2] = e.target.x();
+            this.currentGroup.poly.points[e.target.attrs.num * 2 + 1] = e.target.y();
         },
-        removePointPolygonAndCircle(e){
-            this.transformation = 'on';
-            //клик правой кнопкой
+        mouseoutCircle(){
+            document.body.style.cursor = 'default';
+        },
+        mouseoverCircle(){
+            document.body.style.cursor = 'pointer';
+        },
+        mousedownCircle(c,e){
             if (e.evt.button === 2) {
-                this.contextMenu = false;
-                let circleNum = e.target.attrs.circleNum;
-
-//                    удаление из полигона
-                let points = this.line.points();
-                points.splice(circleNum * 2, 2);
-                this.line.points(points);
-                this.line.draw();
-
-                e.target.parent.getChildren((node)=>{
-                    if (node.getClassName() == 'Circle') {
-                        if (node.attrs.circleNum > circleNum) {
-                            node.attrs.circleNum--;
-                        }
-                    }
+                window.oncontextmenu = () => false;
+                this.currentGroup.poly.points.splice(c.config.num * 2, 2);
+                this.currentGroup.circle.splice(c.config.num,1);
+                this.currentGroup.circle.forEach((circle) => {
+                    if (circle.num > c.config.num) {
+                        circle.num --;                        }
                 });
-                this.transformation = 'off';
-                e.target.destroy();
             }
         },
         circleDragMove(e){
-            let points = this.line.points();
-            points[e.target.attrs.circleNum*2  ] = e.target.x()
-            points[e.target.attrs.circleNum*2 +1] = e.target.y()
-            this.line.points(points);
-            this.line.draw();
+
+        },
+        clone(obj){
+            return JSON.parse(JSON.stringify(obj));
+        },
+        editGroup(e) {
+            //создаем новую группу если полигон пустой
+            if (!this.polygons.length) {
+                const index = this.polygons.push(this.clone(this.defaultGroup));
+                this.polygons[index -1].poly = this.clone(this.defaultConfigPoly);
+            }
+            else if (this.polygons[this.polygons.length -1].poly.saved) {
+                const index = this.polygons.push(this.clone(this.defaultGroup));
+                this.polygons[index -1].poly = this.clone(this.defaultConfigPoly);
+            }
+            this.currentGroup = this.polygons[this.polygons.length -1];
+            //создаем новый круг
+            this.currentGroup.circle.push(this.clone(this.defaultConfigCircle));
+
+            //последний круг
+            const circle = this.currentGroup.circle[this.currentGroup.circle.length - 1],
+                  XY = this.calculatedXY([e.evt.layerX, e.evt.layerY], this.currentGroup);
+
+            //задаем координаты круга
+            circle.x = XY.x;
+            circle.y = XY.y;
+            //задаем координаты полигона линии
+            this.currentGroup.poly.points.push(XY.x);
+            this.currentGroup.poly.points.push(XY.y);
+
+            // сохраняем позицию точек в полигоне
+            circle.num = this.currentGroup.poly.points.length / 2 -1
         },
         //клик по всей рабочей области
         clickStage(c,e) {
-            if (this.transformation === 'on' || e.evt.button === 2) {
+            if (e.evt.button === 2) {
+                window.oncontextmenu = () => true;
                 return false
             }
-
-            const
-              x = this.calculatedXY([e.evt.layerX,e.evt.layerX])[0],
-              y = this.calculatedXY([e.evt.layerX,e.evt.layerY])[1];
-
-            this.line.points(this.line.points().concat([x, y]));
-            this.drawCircle(x, y, this.line.points().length / 2 -1)
-            this.line.draw()
+            this.editGroup(e);
         },
-        //замыкание фигуры
+        //завершение отрисовки фигуры
         setClosed() {
-//            this.configPoly.closed = !this.configPoly.closed
-//            this.$refs.line.getStage().setClosed(this.configPoly.closed)
-//            this.$refs.line.getStage().draw()
-
-            let poly = this.polygons[this.polygons.length - 1]
-            this.polygons.push(JSON.parse(JSON.stringify(poly)))
-
-            this.line = this.$refs.line[this.$refs.line.length - 1].getStage()
-            this.groupPoly = this.$refs.groupPoly[this.$refs.groupPoly.length - 1].getStage()
-            //this.layer = this.$refs.layer[this.$refs.layer.length - 1].getStage()
-            this.layer = this.$refs.layer.getStage()
-
-
-            setTimeout(()=>{ this.line = this.$refs.line[this.polygons.length - 1].getStage() }, 500)
-            this.line.closed(true).draw();
-//            this.groupPoly = this.$refs.groupPoly.getStage()
-//            this.layer = this.$refs.layer.getStage()
-
-        },
-        destroyChildrenCircle(self){
-            var children = window.Konva.Collection.toCollection(self.children);
-            var child;
-            for (var i = 0; i < children.length; i++) {
-                child = children[i];
-                if (child.getClassName() === 'Circle'){
-                    delete child.parent;
-                    child.index = 0;
-                    child.destroy();
-                }
+            if (this.currentGroup.poly) {
+                this.currentGroup.poly.saved = true;
             }
-            children = null;
-            self.children = new window.Konva.Collection();
-            return self
         },
         setClear() {
-
             this.polygons.pop()
-            this.destroyChildrenCircle(this.groupPoly);
-            this.stage.draw();
-
-
-        },
-        unTransformCircle() {
-            this.groupPoly.getChildren((circle)=>{
-                if (circle.getClassName() === 'Circle') {
-                    circle.scaleX(1 / this.groupPoly.scaleX())
-                    circle.scaleY(1 / this.groupPoly.scaleY())
-                }
-            })
-            this.groupPoly.draw();
-        },
-        setTransform() {
-            const stage = this.$refs.stage.getStage()
-            stage.find('Transformer').destroy()
-
-            if (this.transformation == 'off') {
-                this.transformation = 'on'
-                let tr = new window.Konva.Transformer()
-
-                // добавляем трансформаию толлько одноверменную по всем сторонам,
-                // потому что line Stroc невозможно пересчитать
-                tr.keepRatio(true)
-                  .enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
-
-                let layer = this.$refs.layer[this.$refs.layer.length - 1].getStage(tr)
-                tr.attachTo(this.groupPoly)
-                this.groupPoly.draggable(true)
-                layer.add(tr)
-                  .draw()
-            }
-            else {
-                this.transformation = 'off'
-                this.unTransformCircle()
-                this.groupPoly.draggable(false)
-                    .getChildren((node)=>{
-                        if (node.getClassName() === 'Line') {
-                            node.strokeWidth(this.line.strokeWidth() / this.groupPoly.scaleX() );
-                            node.draw();
-                        }
-                    })
-                stage.draw()
-            }
         },
     },
     mounted() {
         this.testImg.onload = () => this.$refs.layerImg.getStage().draw()
         this.testImg.src = "http://crm.m2metr.com/uploads/img/14/53e266e6422e7a773ed8c43f0df9a86c.jpeg"
-
-        this.line = this.$refs.line[this.$refs.line.length - 1].getStage()
-        this.groupPoly = this.$refs.groupPoly[this.$refs.groupPoly.length - 1].getStage()
-        //this.layer = this.$refs.layer[this.$refs.layer.length - 1].getStage()
         this.layer = this.$refs.layer.getStage()
-
-//        this.line = this.$refs.line[this.$refs.line.length - 1].getStage()
-//        this.groupPoly = this.$refs.groupPoly.getStage()
-
-        this.layer = this.$refs.layer.getStage()
-
     }
 }
 </script>
 
 <style scoped>
-
+    textarea {
+        position: absolute;
+        top: 0;
+        right:0;
+    }
 </style>

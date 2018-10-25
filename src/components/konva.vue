@@ -3,12 +3,14 @@
     <h2><span v-if="transformation == 'on'">режим трансформации </span><span v-else>Режим мапинга</span></h2>
     <button @click="setClosed">Замкнуть фигуру</button>&nbsp;
     <button @click="setClear">Очистить</button>&nbsp;
-    <button @click="setTransform">Трансформировать</button>&nbsp;
+    <!--<button @click="setTransform">Трансформировать</button>&nbsp;-->
 
     <label for="scale">Маштаб</label>&nbsp;
     <input type="range" id="scale" min="1" max="100" value="50" @input="scaleAll" > &nbsp;
-
+    <label for="sizePoint">размер точки</label>&nbsp;
+    <input type="number" id="sizePoint" @change="changePointSize" :value="circleRadius">
     <span>Для перетаскивания зажмите ctrl </span>
+    <textarea cols="30" rows="10">{{ polygons }}</textarea>
     <v-stage
             ref="stage"
             :config="configKonva"
@@ -21,8 +23,9 @@
         <v-image :config="configImg"></v-image>
       </v-layer>
       <v-layer ref="layer" >
-        <v-group ref="groupPoly">
-          <v-line ref="line"  :config="configPoly"></v-line>
+        <v-group ref="groupPoly" v-for="poly in polygons">
+          <v-line ref="line"  :config="poly.configPoly"></v-line>
+          <v-circle v-for="c in circle"></v-circle>
         </v-group>
       </v-layer>
     </v-stage>
@@ -38,19 +41,28 @@ export default {
                 width: 1817,
                 height: 648
             },
-            configPoly: {
-                points: [],
-                fill: 'rgba(0,0,0,.5)',
-                stroke: 'black',
-                strokeWidth: 2,
-                closed : false,
-            },
-            cirles: [],
+            polygons:[
+                {
+                    configPoly: {
+                        points: [],
+                        fill: 'rgba(0,0,0,.5)',
+                        stroke: 'black',
+                        strokeWidth: 2,
+                        closed : false,
+                    },
+                    circle:[]
+                },
+            ],
+
             testImg: new Image(100, 100),
             transformation: 'off',
             circleRadius: 3,
             contextMenu: true,
             deltaAllScale: 1,
+            line:{},
+            groupPoly:{},
+            layer:{}
+
         }
     },
     computed: {
@@ -65,59 +77,61 @@ export default {
         }
     },
     methods: {
+        changePointSize(e) {
+            this.groupPoly.getChildren((node)=>{
+                if (node.getClassName() === 'Circle') {
+                    node.radius(+e.target.value);
+                    this.circleRadius = +e.target.value;
+                }
+            })
+            this.groupPoly.draw();
+        },
         moveImage(c,event) {
             const e = event.evt;
             if (e.ctrlKey) {
                 const layerImg = this.$refs.layerImg.getStage();
-                const layer = this.$refs.layer.getStage();
                 layerImg.draggable(true)
                 layerImg.on('dragmove', (node)=>{
-                    layer.x(node.target.x());
-                    layer.y(node.target.y());
-                    layer.draw()
+                    this.layer.x(node.target.x());
+                    this.layer.y(node.target.y());
+                    this.layer.draw()
                 })
             }
         },
         stopDragImage(){
             const layerImg = this.$refs.layerImg.getStage();
             layerImg.draggable(false)
-
-
         },
         scaleAll(c,e){
-            const layer = this.$refs.layer.getStage();
+
             const layerImg = this.$refs.layerImg.getStage();
             if (c instanceof Event) {
                 this.deltaAllScale =  c.target.value * 25 * 0.001;
             }
             else {
-                this.deltaAllScale = layer.scaleX() + -e.evt.deltaY * 0.001;
+                this.deltaAllScale = this.layer.scaleX() + -e.evt.deltaY * 0.001;
             }
-
-            this.unTransformCircle()
-            layer.scaleX(this.deltaAllScale);
-            layer.scaleY(this.deltaAllScale);
-            layer.draw();
-
+            this.$refs.stage.getStage().getChildren((layer)=>{
+                this.unTransformCircle()
+                layer.scaleX(this.deltaAllScale);
+                layer.scaleY(this.deltaAllScale);
+                layer.draw();
+            })
             layerImg.scaleX(this.deltaAllScale);
             layerImg.scaleY(this.deltaAllScale);
             layerImg.draw();
 
         },
         calculatedXY(xy){
-            const   groupPoly = this.$refs.groupPoly.getStage(),
-                    layer = this.$refs.layer.getStage(),
-
-              x = (xy[0] - layer.x() - (groupPoly.x() * this.deltaAllScale)) / (groupPoly.scaleX() * this.deltaAllScale),///
-              y = (xy[1] - layer.y() - (groupPoly.y() * this.deltaAllScale)) / (groupPoly.scaleY() * this.deltaAllScale);///
-
+            let
+              x = (xy[0] - this.layer.x() - (this.groupPoly.x() * this.deltaAllScale)) / (this.groupPoly.scaleX() * this.deltaAllScale),///
+              y = (xy[1] - this.layer.y() - (this.groupPoly.y() * this.deltaAllScale)) / (this.groupPoly.scaleY() * this.deltaAllScale);///
             return [x,y]
-
         },
         drawCircle(x,y,num){
-            const   layer = this.$refs.layer.getStage(),
-                groupPoly = this.$refs.groupPoly.getStage(),
-                circle = new window.Konva.Circle({
+                let layer = this.layer,
+                groupPoly = this.groupPoly,
+                circle = {
                     x: x,
                     y: y,
                     radius: this.circleRadius,
@@ -126,7 +140,7 @@ export default {
                     strokeWidth: 1,
                     draggable: true,
                     circleNum: num
-                });
+                };
 
             circle.on('mousedown',  (e)=> {
                 this.removePointPolygonAndCircle(e);
@@ -162,11 +176,10 @@ export default {
                 let circleNum = e.target.attrs.circleNum;
 
 //                    удаление из полигона
-                const line = this.$refs.line.getStage()
-                let points = line.points();
+                let points = this.line.points();
                 points.splice(circleNum * 2, 2);
-                line.points(points);
-                line.draw();
+                this.line.points(points);
+                this.line.draw();
 
                 e.target.parent.getChildren((node)=>{
                     if (node.getClassName() == 'Circle') {
@@ -180,32 +193,46 @@ export default {
             }
         },
         circleDragMove(e){
-            const line = this.$refs.line.getStage()
-            let points = line.points();
+            let points = this.line.points();
             points[e.target.attrs.circleNum*2  ] = e.target.x()
             points[e.target.attrs.circleNum*2 +1] = e.target.y()
-            line.points(points);
-            line.draw();
+            this.line.points(points);
+            this.line.draw();
         },
-        //клик по все йрабочей области
+        //клик по всей рабочей области
         clickStage(c,e) {
             if (this.transformation === 'on' || e.evt.button === 2) {
                 return false
             }
 
-            const line = this.$refs.line.getStage(),
+            const
               x = this.calculatedXY([e.evt.layerX,e.evt.layerX])[0],
               y = this.calculatedXY([e.evt.layerX,e.evt.layerY])[1];
-            line.points(line.points().concat([x, y]));
-            this.drawCircle(x, y, line.points().length / 2 -1)
 
-            this.$refs.line.getStage().draw()
+            this.line.points(this.line.points().concat([x, y]));
+            this.drawCircle(x, y, this.line.points().length / 2 -1)
+            this.line.draw()
         },
         //замыкание фигуры
         setClosed() {
-            this.configPoly.closed = !this.configPoly.closed
-            this.$refs.line.getStage().setClosed(this.configPoly.closed)
-            this.$refs.line.getStage().draw()
+//            this.configPoly.closed = !this.configPoly.closed
+//            this.$refs.line.getStage().setClosed(this.configPoly.closed)
+//            this.$refs.line.getStage().draw()
+
+            let poly = this.polygons[this.polygons.length - 1]
+            this.polygons.push(JSON.parse(JSON.stringify(poly)))
+
+            this.line = this.$refs.line[this.$refs.line.length - 1].getStage()
+            this.groupPoly = this.$refs.groupPoly[this.$refs.groupPoly.length - 1].getStage()
+            //this.layer = this.$refs.layer[this.$refs.layer.length - 1].getStage()
+            this.layer = this.$refs.layer.getStage()
+
+
+            setTimeout(()=>{ this.line = this.$refs.line[this.polygons.length - 1].getStage() }, 500)
+            this.line.closed(true).draw();
+//            this.groupPoly = this.$refs.groupPoly.getStage()
+//            this.layer = this.$refs.layer.getStage()
+
         },
         destroyChildrenCircle(self){
             var children = window.Konva.Collection.toCollection(self.children);
@@ -223,55 +250,51 @@ export default {
             return self
         },
         setClear() {
-            this.configPoly.points = [];
-            let line = this.$refs.line.getStage(),
-                layer = this.$refs.layer.getStage();
-            let groupPoly = this.$refs.groupPoly.getStage()
-            this.destroyChildrenCircle(groupPoly);
-            this.configPoly.closed = true;
-            this.setClosed()
-            line.points([]);
-            layer.draw();
+
+            this.polygons.pop()
+            this.destroyChildrenCircle(this.groupPoly);
+            this.stage.draw();
+
+
         },
         unTransformCircle() {
-            const groupPoly = this.$refs.groupPoly.getStage()
-            groupPoly.getChildren((circle)=>{
+            this.groupPoly.getChildren((circle)=>{
                 if (circle.getClassName() === 'Circle') {
-                    circle.scaleX(1 / groupPoly.scaleX())
-                    circle.scaleY(1 / groupPoly.scaleY())
+                    circle.scaleX(1 / this.groupPoly.scaleX())
+                    circle.scaleY(1 / this.groupPoly.scaleY())
                 }
             })
+            this.groupPoly.draw();
         },
         setTransform() {
             const stage = this.$refs.stage.getStage()
             stage.find('Transformer').destroy()
 
-            const groupPoly = this.$refs.groupPoly.getStage()
             if (this.transformation == 'off') {
                 this.transformation = 'on'
-                var tr = new window.Konva.Transformer()
+                let tr = new window.Konva.Transformer()
 
                 // добавляем трансформаию толлько одноверменную по всем сторонам,
                 // потому что line Stroc невозможно пересчитать
                 tr.keepRatio(true)
-                tr.enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
+                  .enabledAnchors(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
 
-                let layer = this.$refs.layer.getStage(tr)
-                tr.attachTo(groupPoly)
+                let layer = this.$refs.layer[this.$refs.layer.length - 1].getStage(tr)
+                tr.attachTo(this.groupPoly)
+                this.groupPoly.draggable(true)
                 layer.add(tr)
-                groupPoly.draggable(true)
-                layer.draw()
+                  .draw()
             }
             else {
                 this.transformation = 'off'
                 this.unTransformCircle()
-                groupPoly.draggable(false)
-                groupPoly.getChildren((node)=>{
-                    if (node.getClassName() === 'Line') {
-                        node.strokeWidth(this.configPoly.strokeWidth / groupPoly.scaleX() );
-                        node.draw();
-                    }
-                })
+                this.groupPoly.draggable(false)
+                    .getChildren((node)=>{
+                        if (node.getClassName() === 'Line') {
+                            node.strokeWidth(this.line.strokeWidth() / this.groupPoly.scaleX() );
+                            node.draw();
+                        }
+                    })
                 stage.draw()
             }
         },
@@ -279,6 +302,17 @@ export default {
     mounted() {
         this.testImg.onload = () => this.$refs.layerImg.getStage().draw()
         this.testImg.src = "http://crm.m2metr.com/uploads/img/14/53e266e6422e7a773ed8c43f0df9a86c.jpeg"
+
+        this.line = this.$refs.line[this.$refs.line.length - 1].getStage()
+        this.groupPoly = this.$refs.groupPoly[this.$refs.groupPoly.length - 1].getStage()
+        //this.layer = this.$refs.layer[this.$refs.layer.length - 1].getStage()
+        this.layer = this.$refs.layer.getStage()
+
+//        this.line = this.$refs.line[this.$refs.line.length - 1].getStage()
+//        this.groupPoly = this.$refs.groupPoly.getStage()
+
+        this.layer = this.$refs.layer.getStage()
+
     }
 }
 </script>
